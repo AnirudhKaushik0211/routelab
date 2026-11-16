@@ -9,7 +9,7 @@ Synthetic data.
 
 ## Live demo
 
-Live demo: https://github.com/AnirudhKaushik0211/routeLab
+Live demo: https://anirudhkaushik0211.github.io/routelab/
 
 ## Contents
 
