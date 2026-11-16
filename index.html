@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' data: blob: file:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RouteLab - payment routing and success-rate simulator</title>
+<link rel="stylesheet" href="css/app.css">
+<script src="js/prng.js" defer></script>
+<script src="js/stats.js" defer></script>
+<script src="js/config.js" defer></script>
+<script src="js/scenarios.js" defer></script>
+<script src="js/traffic.js" defer></script>
+<script src="js/model.js" defer></script>
+<script src="js/strategies.js" defer></script>
+<script src="js/engine.js" defer></script>
+<script src="js/metrics.js" defer></script>
+<script src="js/memo.js" defer></script>
+<script src="js/state.js" defer></script>
+<script src="js/charts.js" defer></script>
+<script src="js/routelab.js" defer></script>
+<script src="js/ui.js" defer></script>
+</head>
+<body>
+<a id="rl-skip" class="rl-skip" href="#rl-main">Skip to content</a>
+
+<header id="rl-header">
+  <h1>RouteLab</h1>
+  <p id="rl-tagline">Compare payment-routing strategies on synthetic UPI, card and netbanking traffic. Runs in your browser; nothing is uploaded.</p>
+</header>
+
+<p id="rl-disclaimer">Synthetic data and illustrative assumptions. Results show how routing mechanisms behave, not real-world success rates. Not financial advice.</p>
+
+<div id="rl-status" role="status" aria-live="polite"><span id="rl-status-text"></span></div>
+
+<div id="rl-newhere" class="rl-note" hidden>
+  <span>New here? The Help tab explains what you are looking at.</span>
+  <button type="button" id="rl-newhere-help">Open Help</button>
+  <button type="button" id="rl-newhere-close">Dismiss</button>
+</div>
+
+<div id="rl-tablist" role="tablist" aria-label="Sections">
+  <button type="button" role="tab" id="rl-tab-help" aria-controls="rl-panel-help" aria-selected="true" tabindex="0">Help</button>
+  <button type="button" role="tab" id="rl-tab-scenarios" aria-controls="rl-panel-scenarios" aria-selected="false" tabindex="-1">Scenarios</button>
+  <button type="button" role="tab" id="rl-tab-config" aria-controls="rl-panel-config" aria-selected="false" tabindex="-1">Configure</button>
+  <button type="button" role="tab" id="rl-tab-results" aria-controls="rl-panel-results" aria-selected="false" tabindex="-1">Results</button>
+</div>
+
+<main id="rl-main" tabindex="-1">
+
+<section id="rl-panel-help" role="tabpanel" aria-labelledby="rl-tab-help">
+  <h2>Help</h2>
+
+  <h3>What RouteLab does</h3>
+  <p>RouteLab simulates one day of a merchant's online payments across fictional payment gateways. It compares routing strategies on exactly the same traffic, over many random seeds. Everything is synthetic and runs in this page.</p>
+  <div class="rl-buttons">
+    <button type="button" id="rl-help-start" class="rl-primary">Start with a scenario</button>
+    <button type="button" id="rl-help-run">Run the outage example</button>
+  </div>
+
+  <h3>Quick start</h3>
+  <ol>
+    <li>Pick a scenario in the Scenarios tab.</li>
+    <li>Press Load and run.</li>
+    <li>Read the Results tab: charts, the results table and the expectation checks.</li>
+    <li>Change settings in the Configure tab and run again.</li>
+    <li>Share the address of this page (it holds your settings) or download the memo.</li>
+  </ol>
+
+  <h3>How to read the results</h3>
+  <ul>
+    <li>Order SR is the share of orders that were paid in the end, after retries. First-attempt SR counts only payments that succeeded on the first gateway tried.</li>
+    <li>Each number is a mean across seeds with a 95% interval. A seed is one simulated day with its own random traffic.</li>
+    <li>Differences are paired: every strategy sees the same traffic, so a difference is measured seed by seed and is much more precise than comparing two separate averages.</li>
+    <li>The oracle always picks the gateway with the best true success rate at that moment. Regret is how much success probability a strategy gives up against the oracle, per 1,000 transactions.</li>
+    <li>"Held on these seeds" means the documented expectation for a scenario was met for the seeds of this run. It is not a guarantee for other seeds or for real systems.</li>
+  </ul>
+
+  <h3>Routing strategies</h3>
+  <h4>Static priority</h4>
+  <p>Always try the first gateway in a fixed list that can handle the payment. Precisely: choose the first gateway of the priority list that is eligible; on a retry, skip gateways already tried.</p>
+  <h4>Weighted split</h4>
+  <p>Spread payments across gateways in fixed proportions. Precisely: draw one random number and pick an eligible gateway with probability equal to its weight divided by the total weight of the eligible gateways.</p>
+  <h4>Rule-based</h4>
+  <p>If-then rules written by a person, such as "card payments of Rs 5,000 or more go to Gateway C". Precisely: the first rule whose method, amount range and gateway all match wins; with no match, the static priority applies.</p>
+  <h4>Epsilon-greedy</h4>
+  <p>Mostly use the gateway that looks best from recent results, and sometimes try another one at random. Precisely: with probability epsilon pick an eligible gateway uniformly; otherwise pick the one with the highest estimate successes divided by attempts, counted only over the last window of minutes, per payment method. A gateway with no recent data counts as perfect.</p>
+  <h4>Thompson sampling</h4>
+  <p>Keep a belief about how good each gateway is for each payment method, draw one plausible success rate from each belief and use the gateway whose draw is highest. Precisely: each gateway and method has a Beta distribution with parameters 1 plus discounted successes and 1 plus discounted failures. Old results fade with a half-life, so the router can notice when a gateway gets better or worse (a non-stationary setting). Only completed attempts update the beliefs.</p>
+  <h4>Cost-aware Thompson sampling</h4>
+  <p>The same, but it also cares about fees. Precisely: it picks the gateway with the highest value of the sampled success rate minus lambda times the fee in rupees for this payment.</p>
+  <h4>Oracle (reference)</h4>
+  <p>Not a real strategy: it knows the true success rate of every gateway at every moment and picks the best. It is the yardstick for regret.</p>
+
+  <h3>Scenarios</h3>
+  <div class="rl-scroll" tabindex="0" role="region" aria-label="Scenario descriptions">
+    <table id="rl-help-scenarios"><caption>The seven presets and what each is expected to show</caption><thead><tr><th scope="col">Scenario</th><th scope="col">What to expect</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <h3>Assumptions and limitations</h3>
+  <ul>
+    <li>All gateways, banks and merchants are fictional, and every default number is illustrative or labelled as sourced in the documentation.</li>
+    <li>The default technical failure rates are deliberately much larger than public figures for real systems, so that routing differences show up within one simulated day.</li>
+    <li>Gateways are independent of each other, and each strategy runs in its own simulated world on identical traffic. In real life strategies share gateways.</li>
+    <li>Routers learn per payment method only, not per issuing bank, so they cannot route around a bank outage.</li>
+    <li>Customer drop-off while waiting for a retry follows a simple illustrative model.</li>
+    <li>Fees are fixed amounts or percentages with no volume tiers, and time is one day at a time with no day-of-week effect.</li>
+    <li>Results show mechanisms under these assumptions. They are not forecasts.</li>
+    <li>The full list, the formulas and the sources are in docs/MODEL.md in the repository.</li>
+  </ul>
+
+  <h3>Glossary</h3>
+  <dl id="rl-glossary">
+    <dt>Success rate (SR)</dt><dd>The share of payment attempts or orders that end in a successful payment.</dd>
+    <dt>Order SR</dt><dd>The share of orders paid in the end, counting retries on other gateways.</dd>
+    <dt>First-attempt SR</dt><dd>The share of orders paid on the very first attempt.</dd>
+    <dt>Attempt SR</dt><dd>Successful attempts divided by all attempts, including retries.</dd>
+    <dt>MDR (merchant discount rate)</dt><dd>The fee a merchant pays on a payment, usually a percentage of the amount.</dd>
+    <dt>Fee per success</dt><dd>Total fees paid divided by the number of successful payments.</dd>
+    <dt>UPI intent</dt><dd>A UPI payment started by opening the customer's payment app from the merchant page.</dd>
+    <dt>UPI collect</dt><dd>A UPI payment where the customer receives a request and approves it, which is slower.</dd>
+    <dt>Issuer and remitter bank</dt><dd>The bank that holds the customer's card or account and approves the payment.</dd>
+    <dt>Acquirer</dt><dd>The bank or processor that receives the payment on behalf of the merchant.</dd>
+    <dt>Payment gateway</dt><dd>A service that connects the merchant's checkout to the payment networks and banks.</dd>
+    <dt>PSP (payment service provider)</dt><dd>A company that offers payment acceptance to merchants, often with several gateways or banks behind it.</dd>
+    <dt>Business (customer-side) decline</dt><dd>A failure caused by the customer or their bank, such as insufficient funds. Routing cannot fix it.</dd>
+    <dt>Technical decline</dt><dd>A failure caused by systems, such as a timeout. A different route may fix it.</dd>
+    <dt>Retry and failover</dt><dd>Trying again, possibly on another gateway, after a technical failure.</dd>
+    <dt>Drop-off</dt><dd>A customer giving up instead of waiting for a retry.</dd>
+    <dt>Multi-armed bandit</dt><dd>A decision problem where you repeatedly choose among options with unknown payoffs and learn from the results.</dd>
+    <dt>Exploration and exploitation</dt><dd>Trying options to learn about them, versus using the option that looks best now.</dd>
+    <dt>Epsilon-greedy</dt><dd>A bandit rule that explores a fixed share of the time and exploits otherwise.</dd>
+    <dt>Thompson sampling</dt><dd>A bandit rule that picks an option by sampling from a belief about each option's payoff.</dd>
+    <dt>Beta distribution</dt><dd>A distribution over a probability between 0 and 1, shaped by counts of successes and failures.</dd>
+    <dt>Non-stationary</dt><dd>Changing over time, so old data can mislead.</dd>
+    <dt>Sliding window</dt><dd>Using only the observations from the last fixed number of minutes.</dd>
+    <dt>Discounting and half-life</dt><dd>Letting old observations count for less; the half-life is the time after which an observation counts half as much.</dd>
+    <dt>Oracle</dt><dd>A reference policy that knows the true success rates and always picks the best gateway.</dd>
+    <dt>Regret</dt><dd>The success probability a strategy gives up compared with the oracle, summed over decisions.</dd>
+    <dt>Seed</dt><dd>A number that fixes the random draws, so a simulated day can be repeated exactly.</dd>
+    <dt>Confidence interval</dt><dd>A range that describes how much a result moves from seed to seed; here a 95% interval across seeds.</dd>
+    <dt>Paired comparison</dt><dd>Comparing two strategies on the same seeds and looking at the differences.</dd>
+    <dt>Common random numbers</dt><dd>Giving every strategy the same random traffic and the same random outcomes for each attempt, so differences come from decisions only.</dd>
+  </dl>
+
+  <h3>Privacy</h3>
+  <p>No network requests (blocked by a Content Security Policy and checked by automated tests). No analytics and no cookies. The browser's local storage holds one flag, which remembers that you have seen this Help. The address bar holds your settings after the # sign: browsers do not send that part to a server, but anyone you give the link to can read the settings.</p>
+
+  <h3>Reproducibility</h3>
+  <p>The same settings and seeds always give the same results. The page, the Node library and the command line use the same code.</p>
+
+  <h3>Not financial advice</h3>
+  <p>RouteLab is an educational simulator. It does not describe any real gateway, bank or merchant and is not financial, legal or regulatory advice.</p>
+</section>
+
+<section id="rl-panel-scenarios" role="tabpanel" aria-labelledby="rl-tab-scenarios" hidden>
+  <h2>Scenarios</h2>
+  <fieldset id="rl-scn-group">
+    <legend>Scenario</legend>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-steady" value="steady"><label for="rl-scn-steady">Steady state</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-peak-outage" value="peak-outage" checked><label for="rl-scn-peak-outage">Evening-peak outage on the best gateway</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-collect-degradation" value="collect-degradation"><label for="rl-scn-collect-degradation">UPI collect degradation</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-cost-vs-sr" value="cost-vs-sr"><label for="rl-scn-cost-vs-sr">Cheap-but-flaky vs expensive-but-reliable</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-cold-start" value="cold-start"><label for="rl-scn-cold-start">New gateway joins at noon</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-flapping" value="flapping"><label for="rl-scn-flapping">Flapping gateway</label></div>
+    <div class="rl-check"><input type="radio" name="rl-scn" id="rl-scn-issuer-outage" value="issuer-outage"><label for="rl-scn-issuer-outage">Issuer bank outage (not routable)</label></div>
+  </fieldset>
+  <div id="rl-scn-detail"></div>
+  <div class="rl-buttons">
+    <button type="button" id="rl-scn-load">Load into Configure</button>
+    <button type="button" id="rl-scn-run" class="rl-primary">Load and run</button>
+  </div>
+</section>
+
+<section id="rl-panel-config" role="tabpanel" aria-labelledby="rl-tab-config" hidden>
+  <h2>Configure</h2>
+  <p class="rl-hint">Every field is checked as you type. Gateway and bank names are fixed. Percent fields take values from 0 to 100.</p>
+  <div id="rl-cfg-form"></div>
+  <div id="rl-cfg-errors" role="region" aria-label="Problems to fix" tabindex="-1" hidden></div>
+  <div class="rl-buttons">
+    <button type="button" id="rl-cfg-run" class="rl-primary">Run with these settings</button>
+    <button type="button" id="rl-cfg-reset" disabled>Reset to the preset</button>
+  </div>
+</section>
+
+<section id="rl-panel-results" role="tabpanel" aria-labelledby="rl-tab-results" hidden>
+  <h2 id="rl-res-heading" tabindex="-1">Results</h2>
+  <p id="rl-res-empty">No results yet. Choose a scenario and press Load and run.</p>
+  <div id="rl-run-progress" hidden>
+    <progress id="rl-run-bar" max="1" value="0"></progress>
+    <span id="rl-run-text"></span>
+  </div>
+  <div id="rl-res-body" hidden>
+    <p id="rl-res-summary"><span id="rl-res-summary-text"></span> <span id="rl-res-ran">Ran in <span id="rl-run-time" data-run-id="0" data-ms="0" data-max-slice-ms="0">0</span> ms.</span></p>
+    <p id="rl-res-stale" class="rl-note" hidden>Settings changed since this run. Run again to update.</p>
+
+    <section id="rl-res-expect">
+      <h3>What to expect</h3>
+      <p id="rl-res-expect-text"></p>
+      <ul id="rl-res-expect-list"></ul>
+    </section>
+
+    <figure id="rl-ch-sr">
+      <figcaption>Order success rate over the day</figcaption>
+      <div class="rl-field"><label for="rl-ch-sr-method">Payment method</label>
+        <select id="rl-ch-sr-method"></select></div>
+      <div id="rl-ch-sr-chart" class="rl-chart"></div>
+      <ul id="rl-ch-sr-legend" class="rl-legend"></ul>
+      <details><summary>Show the data</summary>
+        <div class="rl-scroll" tabindex="0" role="region" aria-label="Order success rate by hour"><table id="rl-ch-sr-table"><caption>Order success rate by hour (pooled across seeds)</caption><thead></thead><tbody></tbody></table></div>
+      </details>
+    </figure>
+
+    <figure id="rl-ch-share">
+      <figcaption>Share of first attempts by gateway</figcaption>
+      <div class="rl-field"><label for="rl-ch-share-policy">Strategy</label>
+        <select id="rl-ch-share-policy"></select></div>
+      <div id="rl-ch-share-chart" class="rl-chart"></div>
+      <ul id="rl-ch-share-legend" class="rl-legend"></ul>
+      <details><summary>Show the data</summary>
+        <div class="rl-scroll" tabindex="0" role="region" aria-label="Share of first attempts by hour"><table id="rl-ch-share-table"><caption>Share of first attempts by hour (pooled across seeds)</caption><thead></thead><tbody></tbody></table></div>
+      </details>
+      <details><summary>Gateway attempt success rate by hour</summary>
+        <div class="rl-scroll" tabindex="0" role="region" aria-label="Gateway attempt success rate by hour"><table id="rl-ch-gwsr-table"><caption>Gateway attempt success rate by hour (pooled across seeds)</caption><thead></thead><tbody></tbody></table></div>
+      </details>
+    </figure>
+
+    <figure id="rl-ch-scatter">
+      <figcaption>Cost per success vs order success rate</figcaption>
+      <div id="rl-ch-scatter-chart" class="rl-chart"></div>
+      <ul id="rl-ch-scatter-legend" class="rl-legend"></ul>
+      <details><summary>Show the data</summary>
+        <div class="rl-scroll" tabindex="0" role="region" aria-label="Cost per success and order success rate by strategy"><table id="rl-ch-scatter-table"><caption>Mean cost per success and order success rate by strategy</caption><thead></thead><tbody></tbody></table></div>
+      </details>
+    </figure>
+
+    <div class="rl-scroll" tabindex="0" role="region" aria-label="Results by strategy"><table id="rl-res-table"><caption>Results by strategy (mean and 95% interval across seeds)</caption><thead></thead><tbody></tbody></table></div>
+    <div class="rl-scroll" tabindex="0" role="region" aria-label="Paired differences"><table id="rl-res-paired"><caption></caption><thead></thead><tbody></tbody></table></div>
+    <div id="rl-res-focus-wrap" hidden class="rl-scroll" tabindex="0" role="region" aria-label="Focus window results"><table id="rl-res-focus"><caption></caption><thead></thead><tbody></tbody></table></div>
+    <div class="rl-scroll" tabindex="0" role="region" aria-label="How transactions ended"><table id="rl-res-status"><caption>How transactions ended (share of all transactions)</caption><thead></thead><tbody></tbody></table></div>
+
+  </div>
+
+  <h3>Export</h3>
+  <div class="rl-buttons">
+    <button type="button" id="rl-exp-csv">Download CSV</button>
+    <button type="button" id="rl-exp-json">Download JSON</button>
+    <button type="button" id="rl-exp-memo">Download memo (Markdown)</button>
+    <button type="button" id="rl-exp-copy">Copy memo</button>
+  </div>
+  <details id="rl-memo"><summary>Preview the memo</summary>
+    <pre id="rl-memo-preview" tabindex="0"></pre>
+  </details>
+</section>
+
+</main>
+
+<footer id="rl-footer">RouteLab 1.0.0 - MIT licence - synthetic data only; nothing leaves this page. Not financial advice.</footer>
+</body>
+</html>

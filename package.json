@@ -1,0 +1,18 @@
+{
+  "name": "routelab",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser-only payment-routing and success-rate simulator for UPI and card traffic on synthetic data: static, weighted, rule-based and bandit routers compared on the same seeded traffic.",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.cjs\"",
+    "simulate": "node scripts/simulate.cjs",
+    "results": "node scripts/results.cjs",
+    "bench": "node scripts/bench.cjs",
+    "bench:browser": "node scripts/bench-browser.cjs",
+    "smoke": "node scripts/ui-smoke.cjs",
+    "screenshots": "node scripts/capture-screenshots.cjs",
+    "package": "node scripts/package-public.cjs --require-local"
+  }
+}
